@@ -89,7 +89,7 @@ vectorDistance (LM _ freqs) =
 -- similarity is significant when the input data is
 -- by at least dDistanceThreshold more similar to the best
 -- fitting model than to the one next-to-best
-dDistanceThreshold = 0.007 :: Double
+dDistanceThreshold = 0.01 :: Double
 
 
 wordBoundary = '#' :: Char
@@ -113,18 +113,21 @@ prepare =
 -- and might need readjustment of the value for dDistanceThreshold.
 createFrequencies :: T.Text -> [BigramFreq]
 createFrequencies t =
-    let
-        (bgs, len) = (bigrams &&& T.length) (prepare t)
-    in map (second (\c -> fromIntegral c / fromIntegral len))
-        . take 150                                                      -- 150 bigrams ~4kB (on-disk) language model 
-        . sortBy (comparing (Down . snd))
-        . map (head &&& length)
-        . group
-        . sort
-        . filter (\(x, y) -> x /= wordBoundary && y /= wordBoundary)
-        $ bgs
+    map (second (\c -> fromIntegral c / fromIntegral len))
+    . take 150                                                          -- 150 bigrams ~4kB (on-disk) language model 
+    . sortBy (comparing (Down . snd))
+    . map (head &&& length)
+    . group
+    . sort
+    $ bgs
     where
-        bigrams a = T.zip a (T.tail a)
+        bigrams a   = T.zip a (T.tail a)
+        len         = length bgs
+        bgs         =
+            filter (\(x, y) -> x /= wordBoundary && y /= wordBoundary)
+            . bigrams
+            . prepare
+            $ t        
 
 
 -- loads all .lmod files in current directory
@@ -249,4 +252,4 @@ iso6391Codes = [
 	, ("fr", "Français")
 	, ("pt", "Português")
     , ("sv", "Svenska")
-	]
+    ]
