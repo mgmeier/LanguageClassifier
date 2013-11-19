@@ -45,7 +45,7 @@ import  Data.Ord                (comparing)
 import  Data.Either             (partitionEithers)
 import  Data.Binary
 
-import  Control.Monad           ((>=>))
+import  Control.Monad           ((>=>), when)
 import  Control.Arrow           ((&&&), second)
 import  Control.Exception
 
@@ -89,23 +89,21 @@ vectorDistance (LM _ freqs) =
 -- similarity is significant when the input data is
 -- by at least dDistanceThreshold more similar to the best
 -- fitting model than to the one next-to-best
-dDistanceThreshold = 0.018 :: Double
+dDistanceThreshold = 0.007 :: Double
 
 
+wordBoundary = '#' :: Char
 
 
-
--- leaves only letters and '#' (word boundary) for bigram creation
+-- leaves only letters and '#' (word boundary) for bigram creation.
+-- bigrams containing a word boundary will be disregarded
 prepare :: T.Text -> T.Text
 prepare =
-    addBoundaries
+    T.intercalate (T.singleton wordBoundary)
     . T.words
     . T.filter (\c -> isSpace c || isLetter c)
     . T.map punctuationToSpace
     where 
-        sep = '#'
-        addBoundaries =
-            T.cons sep . flip T.snoc sep . T.intercalate (T.singleton sep) 
         punctuationToSpace c = if isPunctuation c then ' ' else c
 
 
@@ -123,6 +121,7 @@ createFrequencies t =
         . map (head &&& length)
         . group
         . sort
+        . filter (\(x, y) -> x /= wordBoundary && y /= wordBoundary)
         $ bgs
     where
         bigrams a = T.zip a (T.tail a)
@@ -132,8 +131,7 @@ createFrequencies t =
 -- exceptions are caught and wrapped up in the Either type
 loadModels :: IO [Either String LanguageModel]
 loadModels =
-    getCurrentDirectory
-    >>= (getDirectoryContents >=> return . filter (".lmod" `isSuffixOf`))
+    filesByExtension ".lmod"
     >>= mapM tryLoad
     where
         tryLoad fName = (Right `fmap` decodeFile fName)
@@ -148,6 +146,9 @@ loadAndCreateFrequencies =
     B.readFile >=> return . createFrequencies . decodeUtf8
 
 
+filesByExtension ext =
+    getCurrentDirectory
+    >>= (getDirectoryContents >=> return . filter (ext `isSuffixOf`))
 
 
 -- the eval and print part of the REPL
@@ -199,11 +200,21 @@ eval _ _ = putStrLn "unknown command"
 
 
 
-main = 
+main = do
     putStrLn
         "Guess the language !!1!\n\
         \    (c) by M. G. Meier 2013"
-    >> main'
+    lmods <- filesByExtension ".lmod"
+    when (null lmods) $ do
+        fps <- filesByExtension ".txt"
+        sequence_ [rebuildLMod fp | fp <- fps, length fp == 6]
+        putStrLn ".lmod files rebuilt"
+    main'
+    where
+        rebuildLMod fp = do
+            let lcode = take 2 fp
+            freqs <- loadAndCreateFrequencies fp
+            encodeFile (lcode ++ ".lmod") (LM lcode freqs)
     
 main' = do
     (errs, models) <- partitionEithers `fmap` loadModels
@@ -234,8 +245,8 @@ iso6391Codes = [
 	, ("de", "Deutsch")
 	, ("es", "Español")
 	, ("eu", "Euskara")
-    , ("fi", "Suomi")
+	, ("fi", "Suomi")
 	, ("fr", "Français")
 	, ("pt", "Português")
-	, ("sv", "Svenska")
+    , ("sv", "Svenska")
 	]
