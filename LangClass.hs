@@ -114,11 +114,11 @@ createFrequencies t =
 vectorDistance :: LanguageModel -> [BigramFreq] -> Double
 vectorDistance (LM _ freqs) =
     sqrt . sum . map ((^ 2) . distance)
-    where
-        distance (bg, freq) = maybe 
-            (absentBigramPenaltyFactor * freq)                          -- penalty for bigrams absent from the model
-            (subtract freq)
-            (lookup bg freqs)
+  where
+    distance (bg, freq) = maybe 
+        (absentBigramPenaltyFactor * freq)                              -- penalty for bigrams absent from the model
+        (subtract freq)
+        (lookup bg freqs)
 
 
 -- evaluate bigram frequency similarity relative to some language models
