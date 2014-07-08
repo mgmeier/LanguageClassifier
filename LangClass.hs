@@ -1,33 +1,3 @@
-
-
-{-
-    Language Classifier
-    
-    Language Classification based on Bigram Model Similarity
-    (see: http://en.wikipedia.org/wiki/Bigram)
-
-    This program lets you train different language models from
-    text data and save them as binary '.lmod' files. You can
-    then evaluate the similarity of further text or file input
-    to these models, and let the program guess the input language.
-
-    A simple read-eval-print loop (REPL) is included
-    to toy around with.
-    
-    This program just shows how it's done in Haskell and
-    is published for its (hopefully) educational value.
-
-    (c) by M. G. Meier 2013
-    
-    depends:
-        - GHC >= 7.2
-        - binary >= 0.6.3
-        - text
-        - bytestring
-        - readline
--}
-
-
 {-# LANGUAGE    DeriveGeneric #-}
 
 
@@ -57,7 +27,6 @@ import  System.Console.Readline
 -- Types and static data
 --
 
-
 type BigramFreq = ((Char, Char), Double)
 
 
@@ -70,26 +39,28 @@ instance Binary LanguageModel
 
 -- custom Show instance for display in the REPL
 instance Show LanguageModel where
-    show (LM name freqs) = unlines [
-        getExtendedModelName name ++ ", its 30 most common bigrams being:"
+    show (LM name freqs) = unlines
+        [ getExtendedModelName name ++ ", its 30 most common bigrams being:"
         , "  " ++ (unwords . map (deTuple . fst) . take 30) freqs
         ]
-        where deTuple (a, b) = [a, b]
+
+      where
+        deTuple (a, b) = [a, b]
 
 modelName (LM name _) = name
 
 
-absentBigramPenaltyFactor = 1.5 :: Double
+
 
 -- similarity is more significant when the input data is
 -- by at least dDistanceThreshold more similar to the best
 -- fitting model than to the one next-to-best
-dDistanceThreshold = 0.01 :: Double
+dDistanceThreshold          = 0.01 :: Double
 
+absentBigramPenaltyFactor   = 1.5 :: Double
 
 -- special char for intermediate representation of word boundaries
-wordBoundary = '#' :: Char
-
+wordBoundary                = '#' :: Char
 
 
 
@@ -107,10 +78,11 @@ prepare =
     . T.words
     . T.filter (\c -> isSpace c || isLetter c || retain c)
     . T.map punctuationToSpace
-    where 
-        punctuationToSpace c =
-            if isPunctuation c && (not . retain) c then ' ' else c
-        retain = (`elem` "'")                                           -- special chars to retain, e.g. apostrophe
+  
+  where 
+    punctuationToSpace c =
+        if isPunctuation c && (not . retain) c then ' ' else c
+    retain = (`elem` "'")                                               -- special chars to retain, e.g. apostrophe
 
 
 -- creates a list of bigram frequencies given some input data.
@@ -126,14 +98,15 @@ createFrequencies t =
     . group
     . sort
     $ bgs
-    where
-        bigrams a   = T.zip a (T.tail a)
-        len         = length bgs
-        bgs         =
-            filter (\(x, y) -> x /= wordBoundary && y /= wordBoundary)
-            . bigrams
-            . prepare
-            $ t
+
+  where
+    bigrams a   = T.zip a (T.tail a)
+    len         = length bgs
+    bgs         =
+        filter (\(x, y) -> x /= wordBoundary && y /= wordBoundary)
+        . bigrams
+        . prepare
+        $ t
 
 
 -- vector distance of bigram frequencies with respect to a language model
@@ -154,7 +127,8 @@ makeGuess :: Bool -> [LanguageModel] -> [BigramFreq] -> IO ()
 makeGuess showDeltas models freqs
     | length models <= 1 =
         putStrLn "I cant' really tell, need at least 2 language models"
-    | otherwise = let
+    | otherwise =
+        let
             dFreqs@(a:b:_) = sortBy (comparing fst) 
                 [(vectorDistance m freqs, name) | m@(LM name _) <- models]
             bestGuess = getExtendedModelName (snd a)
@@ -181,13 +155,13 @@ makeGuess showDeltas models freqs
 loadModels :: IO [Either String LanguageModel]
 loadModels =
     filesByExtension ".lmod" >>= mapM tryLoad
-    where
-        tryLoad fName = (Right `fmap` decodeFile fName)
-            `catch` (\e -> return $
-                Left (fName ++ " -- " ++ show (e :: SomeException)))
+  where
+    tryLoad fName = (Right `fmap` decodeFile fName)
+        `catch` (\e -> return $
+            Left (fName ++ " -- " ++ show (e :: SomeException)))
         
 
--- loads a text file and creates bigram frequency vector from it
+-- loads a text file and creates bigram frequency vector from it.
 -- can throw an exception
 loadAndCreateFrequencies :: FilePath -> IO [BigramFreq]
 loadAndCreateFrequencies = 
@@ -206,7 +180,8 @@ writeModelFile fp lcode = handle
         freqs <- loadAndCreateFrequencies fp
         encodeFile fName (LM lcode freqs)
         putStrLn ("model file created: " ++ fName)    
-        where fName = lcode ++ ".lmod"
+  where
+    fName = lcode ++ ".lmod"
     
 
 
@@ -269,16 +244,16 @@ main' = do
     mapM_ putStrLn errs
     putStrLn (show (length models) ++ " model(s) loaded")
     repl $ sortBy (comparing modelName) models
-    where
-        repl models =
-            readline "(h for help) > " 
-            >>= maybe (putStrLn "")
-                (\inp -> addHistory inp >> case inp of
-                    "q"         -> return ()
-                    xs@(x:_)
-                        | x `elem` "rt" -> eval models xs >> main'       -- to reload models
-                        | otherwise     -> eval models xs >> repl models
-                    _           -> repl models)
+  where
+    repl models =
+        readline "(h for help) > " 
+        >>= maybe (putStrLn "")
+            (\inp -> addHistory inp >> case inp of
+                "q"         -> return ()
+                xs@(x:_)
+                    | x `elem` "rt" -> eval models xs >> main'          -- to reload models
+                    | otherwise     -> eval models xs >> repl models
+                _           -> repl models)
 
 
 
@@ -288,21 +263,20 @@ main' = do
 -- http://meta.wikimedia.org/wiki/Template:List_of_language_names_ordered_by_code
 --
 
-
 getExtendedModelName name =
     name ++ maybe "" (" -- " ++) (lookup name iso6391Codes)
 
 iso6391Codes = [
-	("br", "Brezhoneg")
-	, ("cy", "Cymraeg")
-	, ("de", "Deutsch")
+    ("br", "Brezhoneg")
+    , ("cy", "Cymraeg")
+    , ("de", "Deutsch")
     , ("en", "English")
-	, ("es", "Español")
+    , ("es", "Español")
     , ("et", "Eesti keel")
-	, ("eu", "Euskara")
-	, ("fi", "Suomi")
-	, ("fr", "Français")
+    , ("eu", "Euskara")
+    , ("fi", "Suomi")
+    , ("fr", "Français")
     , ("ka", "Kartuli ena")
-	, ("pt", "Português")
+    , ("pt", "Português")
     , ("sv", "Svenska")
     ]
