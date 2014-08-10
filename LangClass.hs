@@ -1,4 +1,4 @@
-{-# LANGUAGE    DeriveGeneric #-}
+{-# LANGUAGE    DeriveGeneric, LambdaCase #-}
 
 
 import  GHC.Exts                (Down(..))
@@ -15,12 +15,12 @@ import  Data.Ord                (comparing)
 import  Data.Either             (partitionEithers)
 import  Data.Binary
 
+import  Control.Monad.IO.Class
 import  Control.Monad           ((>=>), when)
 import  Control.Arrow           ((&&&), second)
-import  Control.Exception
 
 import  System.Directory
-import  System.Console.Readline
+import  System.Console.Haskeline
 
 
 --
@@ -123,10 +123,10 @@ vectorDistance (LM _ freqs) =
 
 -- evaluate bigram frequency similarity relative to some language models
 -- to utter a more or less precise guess
-makeGuess :: Bool -> [LanguageModel] -> [BigramFreq] -> IO ()
+makeGuess :: Bool -> [LanguageModel] -> [BigramFreq] -> InputT IO ()
 makeGuess showDeltas models freqs
     | length models <= 1 =
-        putStrLn "I cant' really tell, need at least 2 language models"
+        outputStrLn "I cant' really tell, need at least 2 language models"
     | otherwise =
         let
             dFreqs@(a:b:_) = sortBy (comparing fst) 
@@ -135,10 +135,10 @@ makeGuess showDeltas models freqs
         in do
             when showDeltas $
                 mapM_ (\(dist, name) -> 
-                    putStrLn ("Δ" ++ name ++ " ≈ " ++ showFFloat (Just 6) dist ""))
+                    outputStrLn ("Δ" ++ name ++ " ≈ " ++ showFFloat (Just 6) dist ""))
                     dFreqs
         
-            putStrLn $ if fst b - fst a >= dDistanceThreshold
+            outputStrLn $ if fst b - fst a >= dDistanceThreshold
                 then "I'm quite sure this is: " ++ bestGuess
                 else "I'd have to guess... " ++ bestGuess
 
@@ -152,8 +152,8 @@ makeGuess showDeltas models freqs
 
 -- loads all .lmod files in current directory
 -- exceptions are caught and wrapped up in the Either type
-loadModels :: IO [Either String LanguageModel]
-loadModels =
+loadModels :: InputT IO [Either String LanguageModel]
+loadModels = liftIO $
     filesByExtension ".lmod" >>= mapM tryLoad
   where
     tryLoad fName = (Right `fmap` decodeFile fName)
@@ -169,14 +169,16 @@ loadAndCreateFrequencies =
 
 
 -- returns a list of files with a given extension in the current directory
+filesByExtension :: String -> IO [FilePath]
 filesByExtension ext =
     getCurrentDirectory
     >>= (getDirectoryContents >=> return . filter (ext `isSuffixOf`))
 
 
 -- write a model file for a given language code analyzing some file input
+writeModelFile :: FilePath -> String -> InputT IO ()
 writeModelFile fp lcode = handle
-    (\e -> putStrLn $ fp ++ " -- " ++ show (e :: SomeException)) $ do
+    (\e -> outputStrLn $ fp ++ " -- " ++ show (e :: SomeException)) $ liftIO $ do
         freqs <- loadAndCreateFrequencies fp
         encodeFile fName (LM lcode freqs)
         putStrLn ("model file created: " ++ fName)    
@@ -192,10 +194,10 @@ writeModelFile fp lcode = handle
 --
 
 
-eval :: [LanguageModel] -> String -> IO ()
+eval :: [LanguageModel] -> String -> InputT IO ()
 
 eval _ "h" =
-    putStrLn 
+    outputStrLn 
         "e <file>  - load a file, evaluate differences to loaded models and make a guess\n\
         \i <text>  - for some input, evaluate differences to loaded models and make a guess\n\
         \t <file>  - load a file, train a model from its data\n\
@@ -204,11 +206,11 @@ eval _ "h" =
         \q         - quit"
 
 eval models "s"
-    | null models   = putStrLn "no models loaded"
-    | otherwise     = mapM_ print models
+    | null models   = outputStrLn "no models loaded"
+    | otherwise     = mapM_ (outputStrLn . show) models
 
 eval _  ('t':' ':fp) = do
-    ln <- readline "2-letter language code? "
+    ln <- getInputLine "2-letter language code? "
     let
         lcode = case ln of
             Just c@(a:b:[]) -> c
@@ -216,12 +218,12 @@ eval _  ('t':' ':fp) = do
     writeModelFile fp lcode
 
 eval _ "r" = do
-    fps <- filter ((== 6) . length) `fmap` filesByExtension ".txt"
+    fps <- filter ((== 6) . length) `fmap` liftIO (filesByExtension ".txt")
     sequence_ [writeModelFile fp (take 2 fp) | fp <- fps]    
 
 eval models ('e':' ':fp) = handle
-    (\e -> print (e :: SomeException))
-    (loadAndCreateFrequencies fp >>= makeGuess True models)
+    (\e -> outputStrLn $ show (e :: SomeException)) $
+    liftIO (loadAndCreateFrequencies fp) >>= makeGuess True models
 
 eval models ('i':' ':someInput) =
     makeGuess True models
@@ -229,7 +231,7 @@ eval models ('i':' ':someInput) =
     . T.pack 
     $ someInput
 
-eval _ _ = putStrLn "unknown command"
+eval _ _ = outputStrLn "unknown command"
 
 
 
@@ -237,18 +239,20 @@ main =
     putStrLn
         "Guess the language !!1!\n\
         \    (c) by M. G. Meier 2013"
-    >> main'
+    >> runInputT defaultSettings main' >> putStrLn ""
    
 main' = do
-    (errs, models) <- partitionEithers `fmap` loadModels
-    mapM_ putStrLn errs
-    putStrLn (show (length models) ++ " model(s) loaded")
-    repl $ sortBy (comparing modelName) models
+    (bads, goods) <- partitionEithers `fmap` loadModels
+    mapM_ outputStrLn bads
+    outputStrLn $ show (length goods) ++ " model(s) loaded"
+    
+    repl $ sortBy (comparing modelName) goods
+
   where
     repl models =
-        readline "(h for help) > " 
-        >>= maybe (putStrLn "")
-            (\inp -> addHistory inp >> case inp of
+        getInputLine "(h for help) > " 
+        >>= maybe (outputStrLn "")
+            (\case
                 "q"         -> return ()
                 xs@(x:_)
                     | x `elem` "rt" -> eval models xs >> main'          -- to reload models
